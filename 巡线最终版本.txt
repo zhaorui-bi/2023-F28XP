@@ -1,0 +1,222 @@
+#include<ADS1115_WE.h> 
+#include<Wire.h>
+#define I2C_ADDRESS 0x48
+
+ADS1115_WE adc = ADS1115_WE(I2C_ADDRESS);
+int enablePin1 = 6;
+int enablePin2 = 11;
+int in1Pin = 2;
+int in2Pin = 3;
+int in3Pin = 4;
+int in4Pin = 5;
+boolean reverseL = 0;
+boolean reverseR = 0;
+const int setSpeed = 100;
+int maxSpeed;
+int leftServoSpeed = 0;
+int rightServoSpeed = 0;
+const int irPins[3] = {ADS1115_COMP_1_GND,ADS1115_COMP_2_GND,ADS1115_COMP_3_GND};
+int irSensorDigital[3] = {0, 0, 0};
+int threshold = 500;
+int irSensors = B000;
+int error = 0;
+int errorLast = 0;
+bool signl = false;
+bool signr = false;
+bool signll = false;
+bool signrr = false;
+int count=0;
+int sum=0;
+int rightangle=0;
+float readChannel(ADS1115_MUX channel) {
+  float voltage = 0.0;
+  adc.setCompareChannels(channel);
+  adc.startSingleMeasurement();
+  while(adc.isBusy()){}
+  voltage = adc.getResult_V(); 
+  int analogValue = voltage*(1023/5);
+  return analogValue;
+}
+
+void setup()
+{
+  pinMode(in1Pin, OUTPUT);
+  pinMode(in2Pin, OUTPUT);
+  pinMode(in3Pin, OUTPUT);
+  pinMode(in4Pin, OUTPUT);
+  pinMode(enablePin1, OUTPUT);
+  pinMode(enablePin2, OUTPUT);
+  Wire.begin();
+  Serial.begin(9600);
+  if(!adc.init()){
+    Serial.println("ADS1115 not connected!");
+  }
+  adc.setVoltageRange_mV(ADS1115_RANGE_6144);
+  Serial.println("ADS1115 Example Sketch - Single Shot Mode");
+  Serial.println("Channel / Voltage [V]: ");
+  Serial.println();
+}
+
+void loop()
+{
+  Scan();
+  UpdateDirection();
+  Drive(leftServoSpeed, rightServoSpeed);
+}
+
+void Scan()
+{
+    irSensors = B000;
+    for (int i = 0; i < 3; i++)
+    {
+        int sensorValue = readChannel(irPins[i]);
+        if (sensorValue >= threshold)
+        {
+          irSensorDigital[i] = 1;
+        }
+        else
+        {
+          irSensorDigital[i] = 0;
+        }
+        int b = 2 - i;
+        irSensors = irSensors + (irSensorDigital[i] << b);
+    }
+}
+void UpdateDirection()
+{   rightangle=0;
+    errorLast = error;
+    switch (irSensors)
+    {
+    case B000:
+        if (errorLast < 0)
+        {
+          if(signll==true){
+            error=-75;
+            rightangle=1;
+          }else{
+            error = -52;
+            signll=true;
+          }
+        }
+        else if (errorLast > 0)
+        {
+          if(signrr==true){
+            error=75;
+            rightangle=1;
+          }else{
+            error = 52;
+            signrr=true;
+          }
+        }
+        maxSpeed=setSpeed+8;
+        break;
+    case B100:
+        error = -48;
+        signl = true;
+        signll = false;
+        maxSpeed=setSpeed-10;
+        break;
+    case B110:
+        error = -30;
+        maxSpeed=setSpeed-6;
+        break;
+    case B010:
+        if(signl == true){
+          error = 30;  
+        }else if(signr == true){
+          error = -30;     
+        }else{
+          error=0;
+        }
+        maxSpeed=setSpeed-3;
+        break;
+    case B011:
+        error = 30;
+        maxSpeed=setSpeed-6;
+        break;
+    case B001:
+        error = 48;
+        signr = true;
+        signrr=false;
+        maxSpeed=setSpeed-10;
+        break;
+    case B111:
+        error = -0.3*errorLast;
+        maxSpeed=setSpeed+6;
+        break;
+    default:
+        error = errorLast;
+    }
+    if (error >= 0)
+    {
+//        if(rightangle==1){
+//          leftServoSpeed=90;
+//          rightServoSpeed=0;
+//        }
+//        else{
+          leftServoSpeed = maxSpeed;
+          rightServoSpeed = maxSpeed - error;
+//        }
+        
+    }
+    else if (error < 0)
+    {
+//        if(rightangle==1){
+//          leftServoSpeed=90;
+//          rightServoSpeed=0;
+//        }
+//       else{
+          leftServoSpeed = maxSpeed + error;
+          rightServoSpeed = maxSpeed;
+//        } 
+    }
+//    if(irSensors==B110||irSensors==B011||irSensors==B010||irSensors==B110||irSensors==B011) curve[count]=error;   
+//    if(count==4){
+//       count=0;
+//    }
+//     else{
+//       count++;
+//    }
+//     sum=0;
+//    for(int i=0;i<4;i++){
+//      sum=sum+curve[i];
+//    }
+//    if(irSensors==B110||irSensors==B011||irSensors==B010||irSensors==B011||irSensors==B110) error=sum/4;
+} 
+
+void Drive(int leftSpeed, int rightSpeed)
+{
+  int left = leftSpeed;
+  int right = rightSpeed;
+  reverseL = 0;
+  reverseR = 0;
+  if (left < 0)
+  {
+    left = 0 - left;
+    reverseL = 1;
+  }
+  else if (left > maxSpeed)
+  {
+    left = maxSpeed;
+  }
+  if (right < 0)
+  {
+    right = 0 - right;
+    reverseR = 1;
+  }
+  else if (right > maxSpeed)
+  {
+    right = maxSpeed;
+  }
+  setMotor(left, right, reverseL, reverseR);
+}
+
+void setMotor(int leftServoSpeed, int rightServoSpeed, bool reverseL, bool reverseR)
+{
+  analogWrite(enablePin1, rightServoSpeed);
+  digitalWrite(in1Pin, reverseR);
+  digitalWrite(in2Pin, !reverseR);
+  analogWrite(enablePin2, leftServoSpeed);
+  digitalWrite(in3Pin, reverseL);
+  digitalWrite(in4Pin, !reverseL);
+}
